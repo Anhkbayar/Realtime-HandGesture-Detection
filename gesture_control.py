@@ -3,9 +3,9 @@ import mediapipe as mp
 import serial
 import time
 
-# 🔴 CHANGE THIS to your COM port
+#CHANGE THIS to your COM port
 SERIAL_PORT = 'COM3'
-BAUD_RATE = 9600
+BAUD_RATE = 115200
 
 # Initialize serial
 ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
