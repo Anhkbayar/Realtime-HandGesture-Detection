@@ -1,0 +1,90 @@
+# =========================
+
+# Python
+
+# =========================
+
+**pycache**/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.so
+
+# Virtual environments
+
+venv/
+.env/
+.venv/
+
+# Pip / packaging
+
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook
+
+.ipynb_checkpoints/
+
+# =========================
+
+# Serial / Logs
+
+# =========================
+
+*.log
+
+# =========================
+
+# IDE / Editor
+
+# =========================
+
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# =========================
+
+# OS Files
+
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# =========================
+
+# Arduino / ESP32
+
+# =========================
+
+# Arduino build files
+
+*.ino.cpp
+*.ino.cpp.o
+*.elf
+*.bin
+*.hex
+
+# ESP-IDF / Arduino temp
+
+/build/
+sdkconfig
+sdkconfig.old
+
+# =========================
+
+# Misc
+
+# =========================
+
+*.tmp
+*.swp
+*~
