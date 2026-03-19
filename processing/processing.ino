@@ -4,54 +4,31 @@
 #define RING 45
 #define PINKY 47
 
-char received;
+int value = 0;
 
 void setup() {
-  // put your setup code here, to run once:
   pinMode(THUMB, OUTPUT);
   pinMode(INDEX, OUTPUT);
   pinMode(MIDDLE, OUTPUT);
   pinMode(RING, OUTPUT);
   pinMode(PINKY, OUTPUT);
 
-  digitalWrite(THUMB, LOW);
-  digitalWrite(INDEX, LOW);
-  digitalWrite(MIDDLE, HIGH);
-  digitalWrite(RING, LOW);
-  digitalWrite(PINKY, LOW);
-
   Serial.begin(115200);
   Serial.println("---Initialized---");
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  if (Serial.available() > 0) {
-    received = Serial.read();
+  if (Serial.available()) {
+    value = Serial.parseInt();  // read integer
 
     Serial.print("Received: ");
-    Serial.println(received);
+    Serial.println(value);
 
-    if (received == '1') {
-      openHand();
-    } else if (received == '0') {
-      closeHand();
-    }
+    // Bit mapping
+    digitalWrite(THUMB,  value & 1);        // bit 0
+    digitalWrite(INDEX, (value >> 1) & 1);  // bit 1
+    digitalWrite(MIDDLE,(value >> 2) & 1);  // bit 2
+    digitalWrite(RING,  (value >> 3) & 1);  // bit 3
+    digitalWrite(PINKY, (value >> 4) & 1);  // bit 4
   }
-}
-
-void openHand() {
-  digitalWrite(THUMB, HIGH);
-  digitalWrite(INDEX, HIGH);
-  digitalWrite(MIDDLE, HIGH);
-  digitalWrite(RING, HIGH);
-  digitalWrite(PINKY, HIGH);
-}
-
-void closeHand() {
-  digitalWrite(THUMB, LOW);
-  digitalWrite(INDEX, LOW);
-  digitalWrite(MIDDLE, LOW);
-  digitalWrite(RING, LOW);
-  digitalWrite(PINKY, LOW);
 }
