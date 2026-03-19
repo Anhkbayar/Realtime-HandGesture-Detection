@@ -88,3 +88,6 @@ sdkconfig.old
 *.tmp
 *.swp
 *~
+
+# VS Code temp runner files
+tempCodeRunnerFile*
