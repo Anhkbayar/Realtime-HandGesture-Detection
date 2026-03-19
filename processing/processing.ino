@@ -4,7 +4,7 @@
 #define RING 45
 #define PINKY 47
 
-int value = 0;
+int fingers[5] = {0, 0, 0, 0, 0};
 
 void setup() {
   pinMode(THUMB, OUTPUT);
@@ -19,16 +19,40 @@ void setup() {
 
 void loop() {
   if (Serial.available()) {
-    value = Serial.parseInt();  // read integer
+    String data = Serial.readStringUntil('\n');
 
+    int index = 0;
+    int lastPos = 0;
+
+    for (int i = 0; i < data.length(); i++) {
+      if (data[i] == ',' || i == data.length() - 1) {
+        String valueStr;
+
+        if (i == data.length() - 1) {
+          valueStr = data.substring(lastPos);
+        } else {
+          valueStr = data.substring(lastPos, i);
+        }
+
+        fingers[index] = valueStr.toInt();
+        index++;
+        lastPos = i + 1;
+      }
+    }
+
+    // Apply to LEDs
+    digitalWrite(THUMB, fingers[0]);
+    digitalWrite(INDEX, fingers[1]);
+    digitalWrite(MIDDLE, fingers[2]);
+    digitalWrite(RING, fingers[3]);
+    digitalWrite(PINKY, fingers[4]);
+
+    // Debug
     Serial.print("Received: ");
-    Serial.println(value);
-
-    // Bit mapping
-    digitalWrite(THUMB,  value & 1);        // bit 0
-    digitalWrite(INDEX, (value >> 1) & 1);  // bit 1
-    digitalWrite(MIDDLE,(value >> 2) & 1);  // bit 2
-    digitalWrite(RING,  (value >> 3) & 1);  // bit 3
-    digitalWrite(PINKY, (value >> 4) & 1);  // bit 4
+    for (int i = 0; i < 5; i++) {
+      Serial.print(fingers[i]);
+      Serial.print(" ");
+    }
+    Serial.println();
   }
 }

@@ -15,12 +15,12 @@ mp_draw = mp.solutions.drawing_utils
 
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
-prev_value = -1
+prev_data = ""
 
 def get_finger_state(landmarks):
     fingers = []
 
-    # Thumb (special case: x comparison)
+    # Thumb (x comparison)
     if landmarks[4].x < landmarks[3].x:
         fingers.append(1)
     else:
@@ -35,7 +35,7 @@ def get_finger_state(landmarks):
         else:
             fingers.append(0)
 
-    return fingers
+    return fingers  # [thumb, index, middle, ring, pinky]
 
 while True:
     ret, frame = cap.read()
@@ -47,24 +47,22 @@ while True:
 
     result = hands.process(rgb)
 
-    value = 0
+    data_str = "0,0,0,0,0"
 
     if result.multi_hand_landmarks:
         for handLms in result.multi_hand_landmarks:
             fingers = get_finger_state(handLms.landmark)
 
-            # Convert to integer (bitmask)
-            for i in range(5):
-                value |= (fingers[i] << i)
+            data_str = ",".join(map(str, fingers))
 
             mp_draw.draw_landmarks(frame, handLms, mp_hands.HAND_CONNECTIONS)
 
     # Send only if changed
-    if value != prev_value:
-        ser.write(f"{value}\n".encode())
-        prev_value = value
+    if data_str != prev_data:
+        ser.write((data_str + "\n").encode())
+        prev_data = data_str
 
-    cv2.putText(frame, f"Value: {value}", (10, 40),
+    cv2.putText(frame, f"{data_str}", (10, 40),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
     cv2.imshow("Finger Mapping", frame)
