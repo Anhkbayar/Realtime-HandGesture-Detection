@@ -1,10 +1,22 @@
+#include "pitches.h"
+
 #define THUMB 40
 #define INDEX 41
 #define MIDDLE 42
 #define RING 45
 #define PINKY 47
 
-int fingers[5] = {0, 0, 0, 0, 0};
+#define BUZZER 37
+
+int fingers[5] = { 0, 0, 0, 0, 0 };
+
+int fingerNotes[5] = {
+  NOTE_C4,  // Thumb
+  NOTE_D4,  // Index
+  NOTE_E4,  // Middle
+  NOTE_F4,  // Ring
+  NOTE_G4   // Pinky
+};
 
 void setup() {
   pinMode(THUMB, OUTPUT);
@@ -12,6 +24,8 @@ void setup() {
   pinMode(MIDDLE, OUTPUT);
   pinMode(RING, OUTPUT);
   pinMode(PINKY, OUTPUT);
+
+  pinMode(BUZZER, OUTPUT);
 
   Serial.begin(115200);
   Serial.println("---Initialized---");
@@ -41,11 +55,24 @@ void loop() {
     }
 
     // Apply to LEDs
-    digitalWrite(THUMB, fingers[0]);
-    digitalWrite(INDEX, fingers[1]);
-    digitalWrite(MIDDLE, fingers[2]);
-    digitalWrite(RING, fingers[3]);
-    digitalWrite(PINKY, fingers[4]);
+    int fingerPins[5] = { THUMB, INDEX, MIDDLE, RING, PINKY };
+
+    bool playing = false;
+
+    for (int i = 0; i < 5; i++) {
+      // LED control
+      digitalWrite(fingerPins[i], fingers[i]);
+
+      // Sound control
+      if (fingers[i] == 1 && !playing) {
+        tone(BUZZER, fingerNotes[i]);
+        playing = true;
+      }
+    }
+
+    if (!playing) {
+      noTone(BUZZER);
+    }
 
     // Debug
     Serial.print("Received: ");
