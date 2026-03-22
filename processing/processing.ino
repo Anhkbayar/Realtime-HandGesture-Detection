@@ -7,25 +7,31 @@
 #define PINKY 47
 
 #define BUZZER 37
+#define RELAY 5
+
+int fingerPins[5] = { THUMB, INDEX, MIDDLE, RING, PINKY };
+
+int fingerNotes[5] = {
+  NOTE_C4,
+  NOTE_D4,
+  NOTE_E4,
+  NOTE_F4,
+  NOTE_G4
+};
 
 int fingers[5] = { 0, 0, 0, 0, 0 };
 
-int fingerNotes[5] = {
-  NOTE_C4,  // Thumb
-  NOTE_D4,  // Index
-  NOTE_E4,  // Middle
-  NOTE_F4,  // Ring
-  NOTE_G4   // Pinky
-};
+String TARGET = "1,0,1,0,0";
+
+bool relayTriggered = false;   // prevents repeated buzzing
 
 void setup() {
-  pinMode(THUMB, OUTPUT);
-  pinMode(INDEX, OUTPUT);
-  pinMode(MIDDLE, OUTPUT);
-  pinMode(RING, OUTPUT);
-  pinMode(PINKY, OUTPUT);
+  for (int i = 0; i < 5; i++) {
+    pinMode(fingerPins[i], OUTPUT);
+  }
 
   pinMode(BUZZER, OUTPUT);
+  pinMode(RELAY, OUTPUT);
 
   Serial.begin(115200);
   Serial.println("---Initialized---");
@@ -34,52 +40,57 @@ void setup() {
 void loop() {
   if (Serial.available()) {
     String data = Serial.readStringUntil('\n');
+    data.trim();
 
+    // Parse incoming "0,1,0,1,0"
     int index = 0;
-    int lastPos = 0;
+    for (int i = 0; i < 5; i++) {
+      int commaIndex = data.indexOf(',');
 
-    for (int i = 0; i < data.length(); i++) {
-      if (data[i] == ',' || i == data.length() - 1) {
-        String valueStr;
-
-        if (i == data.length() - 1) {
-          valueStr = data.substring(lastPos);
-        } else {
-          valueStr = data.substring(lastPos, i);
-        }
-
-        fingers[index] = valueStr.toInt();
-        index++;
-        lastPos = i + 1;
+      if (commaIndex != -1) {
+        fingers[i] = data.substring(0, commaIndex).toInt();
+        data = data.substring(commaIndex + 1);
+      } else {
+        fingers[i] = data.toInt();
       }
     }
 
-    // Apply to LEDs
-    int fingerPins[5] = { THUMB, INDEX, MIDDLE, RING, PINKY };
-
-    bool playing = false;
-
+    // ----------------------------
+    // 1. CONTROL LIGHTS ONLY
+    // ----------------------------
     for (int i = 0; i < 5; i++) {
-      // LED control
       digitalWrite(fingerPins[i], fingers[i]);
-
-      // Sound control
-      if (fingers[i] == 1 && !playing) {
-        tone(BUZZER, fingerNotes[i]);
-        playing = true;
-      }
     }
 
-    if (!playing) {
-      noTone(BUZZER);
-    }
-
-    // Debug
-    Serial.print("Received: ");
+    // ----------------------------
+    // 2. CHECK TARGET GESTURE
+    // ----------------------------
+    String current = "";
     for (int i = 0; i < 5; i++) {
-      Serial.print(fingers[i]);
-      Serial.print(" ");
+      current += String(fingers[i]);
+      if (i < 4) current += ",";
     }
-    Serial.println();
+
+    if (current == TARGET && !relayTriggered) {
+      Serial.println("TARGET DETECTED!");
+
+      // Trigger relay
+      digitalWrite(RELAY, HIGH);
+
+      // Play buzzer melody ONCE
+      for (int i = 0; i < 5; i++) {
+        tone(BUZZER, fingerNotes[i], 150);
+        delay(200);
+      }
+      noTone(BUZZER);
+
+      relayTriggered = true; // prevent repeat
+    }
+
+    // Reset trigger when gesture changes
+    if (current != TARGET) {
+      relayTriggered = false;
+      digitalWrite(RELAY, LOW);
+    }
   }
 }

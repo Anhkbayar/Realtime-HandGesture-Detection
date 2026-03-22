@@ -6,6 +6,11 @@ import time
 SERIAL_PORT = 'COM3'
 BAUD_RATE = 115200
 
+TARGET = "1,0,1,0,0"
+countdown_active = False
+countdown_start = 0
+countdown_value = 3
+
 ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
 time.sleep(2)
 
@@ -54,6 +59,11 @@ while True:
             fingers = get_finger_state(handLms.landmark)
 
             data_str = ",".join(map(str, fingers))
+            
+            if data_str == TARGET and not countdown_active:
+                countdown_active = True
+                countdown_start = time.time()
+                countdown_value = 3
 
             mp_draw.draw_landmarks(frame, handLms, mp_hands.HAND_CONNECTIONS)
 
@@ -64,6 +74,27 @@ while True:
 
     cv2.putText(frame, f"{data_str}", (10, 40),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    
+    # Countdown logic
+    if data_str == TARGET:
+        if not countdown_active:
+            countdown_active = True
+            countdown_start = time.time()
+
+        elapsed = int(time.time() - countdown_start)
+
+        if elapsed < 3:
+            countdown_value = 3 - elapsed
+            cv2.putText(frame, f"Starting in {countdown_value}", (10, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+        else:
+            cv2.putText(frame, "KABOOM!", (10, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
+
+    else:
+        #Gesture gone reset
+        countdown_active = False
+        countdown_start = 0
 
     cv2.imshow("Finger Mapping", frame)
 
