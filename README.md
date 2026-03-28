@@ -1,2 +1,2 @@
 # Realtime-HandGesture-Detection
-Anka ba Munkhgereltiin suirel
+Anka ba Munkhgereltiin buteel
