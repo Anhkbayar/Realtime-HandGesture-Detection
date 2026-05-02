@@ -1,3 +1,4 @@
+import os
 import time
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
@@ -9,10 +10,19 @@ import pyautogui
 
 
 CAMERA_INDEX = 0
+CAMERA_INDEX_ENV = "HAND_GESTURE_CAMERA_INDEX"
+CAMERA_SCAN_LIMIT = 10
+CAMERA_RESOLUTIONS = ((1280, 720), (960, 540), (640, 480), None)
+CAMERA_WARMUP_READS = 20
+CAMERA_WARMUP_DELAY_SECONDS = 0.05
+BLACK_FRAME_MEAN_THRESHOLD = 5.0
+BLACK_FRAME_STD_THRESHOLD = 3.0
+MAX_CONSECUTIVE_CAMERA_READ_FAILURES = 30
 WINDOW_NAME = "Hand Gesture HCI"
 
 DETECTION_CONFIDENCE = 0.7
 TRACKING_CONFIDENCE = 0.7
+MODEL_COMPLEXITY = 0
 
 PINCH_DISTANCE = 0.045
 CLICK_COOLDOWN_SECONDS = 0.55
@@ -28,6 +38,13 @@ OVERLAY_GREEN = (30, 220, 30)
 OVERLAY_RED = (40, 40, 230)
 OVERLAY_BLUE = (230, 150, 40)
 OVERLAY_WHITE = (245, 245, 245)
+OVERLAY_BLACK = (0, 0, 0)
+
+CAMERA_BACKENDS = (
+    ("MSMF", cv2.CAP_MSMF),
+    ("DirectShow", cv2.CAP_DSHOW),
+    ("Default", cv2.CAP_ANY),
+)
 
 
 @dataclass
@@ -84,7 +101,7 @@ def recognize_gesture(landmarks: Sequence, fingers: Tuple[int, int, int, int, in
     if thumb_middle_pinched:
         return "Right Click Pinch"
 
-    if fingers == (0, 1, 0, 0, 0):
+    if fingers[1] == 1 and fingers[2:] == (0, 0, 0):
         return "Cursor Move"
 
     if fingers == (0, 1, 1, 0, 0):
@@ -308,12 +325,139 @@ def draw_overlay(
         y += 30
 
 
+def show_startup_frame(cap) -> None:
+    ret, frame = cap.read()
+    if not ret or frame is None or frame.size == 0:
+        return
+
+    frame = cv2.flip(frame, 1)
+    cv2.putText(
+        frame,
+        "Camera ready. Starting hand tracking...",
+        (12, 32),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        OVERLAY_BLACK,
+        4,
+    )
+    cv2.putText(
+        frame,
+        "Camera ready. Starting hand tracking...",
+        (12, 32),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        OVERLAY_WHITE,
+        2,
+    )
+    cv2.imshow(WINDOW_NAME, frame)
+    cv2.waitKey(1)
+
+
+def get_preferred_camera_index() -> int:
+    raw_index = os.getenv(CAMERA_INDEX_ENV)
+    if raw_index is None:
+        return CAMERA_INDEX
+
+    try:
+        return int(raw_index)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{CAMERA_INDEX_ENV} must be an integer camera index, got {raw_index!r}."
+        ) from exc
+
+
+def camera_index_candidates(preferred_index: int) -> Tuple[int, ...]:
+    candidates = [preferred_index]
+    for index in range(CAMERA_SCAN_LIMIT + 1):
+        if index not in candidates:
+            candidates.append(index)
+    return tuple(candidates)
+
+
+def frame_has_visible_image(frame) -> bool:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    return not (
+        float(gray.mean()) < BLACK_FRAME_MEAN_THRESHOLD
+        and float(gray.std()) < BLACK_FRAME_STD_THRESHOLD
+    )
+
+
+def read_valid_frame(cap) -> bool:
+    for _ in range(CAMERA_WARMUP_READS):
+        ret, frame = cap.read()
+        if (
+            ret
+            and frame is not None
+            and frame.size > 0
+            and frame_has_visible_image(frame)
+        ):
+            return True
+        time.sleep(CAMERA_WARMUP_DELAY_SECONDS)
+    return False
+
+
+def request_camera_resolution(cap, resolution: Optional[Tuple[int, int]]) -> None:
+    if resolution is None:
+        return
+
+    width, height = resolution
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+
+def describe_camera_resolution(cap) -> str:
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    return f"{width}x{height}"
+
+
+def describe_requested_resolution(resolution: Optional[Tuple[int, int]]) -> str:
+    if resolution is None:
+        return "default resolution"
+
+    width, height = resolution
+    return f"{width}x{height}"
+
+
 def open_camera():
-    cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
-    if not cap.isOpened():
-        cap.release()
-        cap = cv2.VideoCapture(CAMERA_INDEX)
-    return cap
+    attempts = []
+
+    for index in camera_index_candidates(get_preferred_camera_index()):
+        for backend_name, backend in CAMERA_BACKENDS:
+            for resolution in CAMERA_RESOLUTIONS:
+                cap = cv2.VideoCapture(index, backend)
+                requested_resolution = describe_requested_resolution(resolution)
+                if not cap.isOpened():
+                    attempts.append(
+                        f"index {index} via {backend_name} at "
+                        f"{requested_resolution}: open failed"
+                    )
+                    cap.release()
+                    break
+
+                request_camera_resolution(cap, resolution)
+
+                if read_valid_frame(cap):
+                    print(
+                        f"Opened camera index {index} via {backend_name} "
+                        f"at {describe_camera_resolution(cap)}.",
+                        flush=True,
+                    )
+                    return cap
+
+                attempts.append(
+                    f"index {index} via {backend_name} at "
+                    f"{requested_resolution}: opened but no visible frames"
+                )
+                cap.release()
+
+    details = "\n".join(f"- {attempt}" for attempt in attempts)
+    raise RuntimeError(
+        "Unable to open a webcam and read frames.\n"
+        "Close other apps using the camera, remove any camera cover, check Windows "
+        f"camera privacy settings, or set {CAMERA_INDEX_ENV} to the correct camera index.\n"
+        f"Attempts:\n{details}"
+    )
 
 
 def main() -> None:
@@ -332,54 +476,74 @@ def main() -> None:
     state = RuntimeState()
 
     cap = open_camera()
-    if not cap.isOpened():
-        raise RuntimeError("Unable to open webcam at camera index 0.")
+    show_startup_frame(cap)
+    print("Starting hand tracking. Press Esc in the camera window to quit.", flush=True)
 
-    with mp_hands.Hands(
-        max_num_hands=1,
-        min_detection_confidence=DETECTION_CONFIDENCE,
-        min_tracking_confidence=TRACKING_CONFIDENCE,
-    ) as hands:
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+    try:
+        with mp_hands.Hands(
+            model_complexity=MODEL_COMPLEXITY,
+            max_num_hands=1,
+            min_detection_confidence=DETECTION_CONFIDENCE,
+            min_tracking_confidence=TRACKING_CONFIDENCE,
+        ) as hands:
+            failed_reads = 0
 
-            frame = cv2.flip(frame, 1)
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            result = hands.process(rgb_frame)
+            while True:
+                ret, frame = cap.read()
+                if (
+                    not ret
+                    or frame is None
+                    or frame.size == 0
+                    or not frame_has_visible_image(frame)
+                ):
+                    failed_reads += 1
+                    if failed_reads >= MAX_CONSECUTIVE_CAMERA_READ_FAILURES:
+                        raise RuntimeError(
+                            "Camera opened, but it stopped returning visible frames. "
+                            "Remove any camera cover, close other camera apps, or try "
+                            f"a different {CAMERA_INDEX_ENV} value."
+                        )
+                    time.sleep(CAMERA_WARMUP_DELAY_SECONDS)
+                    continue
 
-            detected = False
-            gesture = "None"
-            fingers = (0, 0, 0, 0, 0)
-            now = time.time()
+                failed_reads = 0
+                frame = cv2.flip(frame, 1)
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                result = hands.process(rgb_frame)
 
-            if result.multi_hand_landmarks:
-                detected = True
-                hand_landmarks = result.multi_hand_landmarks[0]
-                landmarks = hand_landmarks.landmark
-                fingers = get_finger_state(landmarks)
-                gesture = recognize_gesture(landmarks, fingers)
+                detected = False
+                gesture = "None"
+                fingers = (0, 0, 0, 0, 0)
+                now = time.time()
 
-                handle_clutch(state, gesture, now)
-                execute_action(state, gesture, landmarks, screen_size, now)
+                if result.multi_hand_landmarks:
+                    detected = True
+                    hand_landmarks = result.multi_hand_landmarks[0]
+                    landmarks = hand_landmarks.landmark
+                    fingers = get_finger_state(landmarks)
+                    gesture = recognize_gesture(landmarks, fingers)
 
-                mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-            else:
-                handle_clutch(state, gesture, now)
-                state.cursor_position = None
-                state.scroll_anchor_y = None
-                state.swipe_started_at = None
-                state.swipe_start_x = None
+                    handle_clutch(state, gesture, now)
+                    execute_action(state, gesture, landmarks, screen_size, now)
 
-            draw_overlay(frame, state, detected, gesture, fingers)
-            cv2.imshow(WINDOW_NAME, frame)
+                    mp_draw.draw_landmarks(
+                        frame, hand_landmarks, mp_hands.HAND_CONNECTIONS
+                    )
+                else:
+                    handle_clutch(state, gesture, now)
+                    state.cursor_position = None
+                    state.scroll_anchor_y = None
+                    state.swipe_started_at = None
+                    state.swipe_start_x = None
 
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
+                draw_overlay(frame, state, detected, gesture, fingers)
+                cv2.imshow(WINDOW_NAME, frame)
 
-    cap.release()
-    cv2.destroyAllWindows()
+                if cv2.waitKey(1) & 0xFF == 27:
+                    break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

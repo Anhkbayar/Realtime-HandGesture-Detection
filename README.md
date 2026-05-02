@@ -12,7 +12,7 @@ This project uses MediaPipe Hands and OpenCV to detect hand gestures from a webc
 ## Requirements
 
 - Windows.
-- Webcam at camera index `0`.
+- Webcam. The app tries camera index `0` first, then scans nearby indices.
 - Python 3.12 virtual environment recommended.
 - MediaPipe is pinned to `0.10.21` because newer `0.10.33+` wheels expose only the Tasks API and no longer include `mp.solutions.hands`, which this webcam HCI demo uses.
 
@@ -37,6 +37,13 @@ pip install -r requirements.txt
 ## Run
 
 ```powershell
+python gesture_control.py
+```
+
+If OpenCV chooses the wrong camera, set the camera index before running:
+
+```powershell
+$env:HAND_GESTURE_CAMERA_INDEX = "1"
 python gesture_control.py
 ```
 
