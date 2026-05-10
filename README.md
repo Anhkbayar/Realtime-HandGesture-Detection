@@ -58,10 +58,10 @@ Start with the app disarmed. Hold an open palm steady for about one second to ar
 | Index finger only | Move cursor |
 | Thumb + index pinch | Left click |
 | Thumb + middle pinch | Right click |
-| Index + middle raised | Scroll by moving hand up or down |
+| Peace sign pointing up/down | Scroll up/down continuously |
 | Thumb up | Volume up |
 | Thumb down | Volume down |
-| Open palm swipe left | Navigate back |
-| Open palm swipe right | Navigate forward |
+| Thumb left | Navigate back |
+| Thumb right | Navigate forward |
 
 PyAutoGUI fail-safe is enabled. Move the mouse to a screen corner to interrupt automation if needed.

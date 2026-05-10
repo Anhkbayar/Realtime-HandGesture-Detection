@@ -25,13 +25,16 @@ TRACKING_CONFIDENCE = 0.7
 MODEL_COMPLEXITY = 0
 
 PINCH_DISTANCE = 0.045
+PINCH_PREP_DISTANCE = 0.075
 CLICK_COOLDOWN_SECONDS = 0.55
 KEY_COOLDOWN_SECONDS = 0.65
 CLUTCH_HOLD_SECONDS = 1.0
 CLUTCH_RELEASE_SECONDS = 0.45
-SWIPE_DISTANCE = 0.22
-SWIPE_WINDOW_SECONDS = 0.75
-SCROLL_SCALE = 2600
+FINGER_EXTENSION_MARGIN = 0.025
+PEACE_DIRECTION_MARGIN = 0.035
+THUMB_DIRECTION_MARGIN = 0.07
+SCROLL_STEP = 14
+SCROLL_INTERVAL_SECONDS = 0.03
 CURSOR_SMOOTHING = 0.25
 
 OVERLAY_GREEN = (30, 220, 30)
@@ -53,9 +56,7 @@ class RuntimeState:
     clutch_started_at: Optional[float] = None
     clutch_locked_until_release: bool = False
     open_palm_released_at: Optional[float] = None
-    swipe_started_at: Optional[float] = None
-    swipe_start_x: Optional[float] = None
-    scroll_anchor_y: Optional[float] = None
+    last_scroll_at: float = 0.0
     cursor_position: Optional[Tuple[float, float]] = None
     last_action: str = "None"
     last_left_click_at: float = 0.0
@@ -88,9 +89,42 @@ def get_finger_state(landmarks: Sequence) -> Tuple[int, int, int, int, int]:
     return tuple(fingers)
 
 
+def finger_extended_from_wrist(landmarks: Sequence, tip: int, pip: int) -> bool:
+    return landmark_distance(landmarks, 0, tip) > (
+        landmark_distance(landmarks, 0, pip) + FINGER_EXTENSION_MARGIN
+    )
+
+
+def get_peace_sign_direction(landmarks: Sequence) -> Optional[str]:
+    index_extended = finger_extended_from_wrist(landmarks, 8, 6)
+    middle_extended = finger_extended_from_wrist(landmarks, 12, 10)
+    ring_folded = not finger_extended_from_wrist(landmarks, 16, 14)
+    pinky_folded = not finger_extended_from_wrist(landmarks, 20, 18)
+
+    if not (index_extended and middle_extended and ring_folded and pinky_folded):
+        return None
+
+    tip_y = (landmarks[8].y + landmarks[12].y) / 2
+    pip_y = (landmarks[6].y + landmarks[10].y) / 2
+
+    if tip_y < pip_y - PEACE_DIRECTION_MARGIN:
+        return "up"
+
+    if tip_y > pip_y + PEACE_DIRECTION_MARGIN:
+        return "down"
+
+    return None
+
+
 def recognize_gesture(landmarks: Sequence, fingers: Tuple[int, int, int, int, int]) -> str:
-    thumb_index_pinched = landmark_distance(landmarks, 4, 8) < PINCH_DISTANCE
-    thumb_middle_pinched = landmark_distance(landmarks, 4, 12) < PINCH_DISTANCE
+    thumb_index_distance = landmark_distance(landmarks, 4, 8)
+    thumb_middle_distance = landmark_distance(landmarks, 4, 12)
+    thumb_index_pinched = thumb_index_distance < PINCH_DISTANCE
+    thumb_middle_pinched = thumb_middle_distance < PINCH_DISTANCE
+    click_prep = (
+        thumb_index_distance < PINCH_PREP_DISTANCE
+        or thumb_middle_distance < PINCH_PREP_DISTANCE
+    )
 
     if all(fingers):
         return "Open Palm"
@@ -101,21 +135,35 @@ def recognize_gesture(landmarks: Sequence, fingers: Tuple[int, int, int, int, in
     if thumb_middle_pinched:
         return "Right Click Pinch"
 
+    if click_prep:
+        return "Click Prep"
+
+    peace_direction = get_peace_sign_direction(landmarks)
+    if peace_direction == "up":
+        return "Scroll Up"
+
+    if peace_direction == "down":
+        return "Scroll Down"
+
     if fingers[1] == 1 and fingers[2:] == (0, 0, 0):
         return "Cursor Move"
 
-    if fingers == (0, 1, 1, 0, 0):
-        return "Scroll"
-
     if fingers[0] == 1 and fingers[1:] == (0, 0, 0, 0):
         thumb_tip = landmarks[4]
-        thumb_base = landmarks[2]
         wrist = landmarks[0]
+        thumb_dx = thumb_tip.x - wrist.x
+        thumb_dy = thumb_tip.y - wrist.y
 
-        if thumb_tip.y < wrist.y and thumb_tip.y < thumb_base.y:
+        if abs(thumb_dx) > max(abs(thumb_dy), THUMB_DIRECTION_MARGIN):
+            if thumb_dx < 0:
+                return "Navigate Back"
+
+            return "Navigate Forward"
+
+        if thumb_dy < -THUMB_DIRECTION_MARGIN:
             return "Volume Up"
 
-        if thumb_tip.y > wrist.y and thumb_tip.y > thumb_base.y:
+        if thumb_dy > THUMB_DIRECTION_MARGIN:
             return "Volume Down"
 
     return "Unknown"
@@ -175,20 +223,14 @@ def move_cursor(state: RuntimeState, landmarks: Sequence, screen_size: Tuple[int
     set_last_action(state, "Cursor move")
 
 
-def scroll_from_hand(state: RuntimeState, landmarks: Sequence) -> None:
-    current_y = landmarks[8].y
-
-    if state.scroll_anchor_y is None:
-        state.scroll_anchor_y = current_y
+def scroll_from_hand(state: RuntimeState, gesture: str, now: float) -> None:
+    if now - state.last_scroll_at < SCROLL_INTERVAL_SECONDS:
         return
 
-    delta = state.scroll_anchor_y - current_y
-    scroll_amount = int(delta * SCROLL_SCALE)
-
-    if abs(scroll_amount) >= 4:
-        pyautogui.scroll(scroll_amount)
-        state.scroll_anchor_y = current_y
-        set_last_action(state, f"Scroll {scroll_amount}")
+    scroll_amount = SCROLL_STEP if gesture == "Scroll Up" else -SCROLL_STEP
+    pyautogui.scroll(scroll_amount)
+    state.last_scroll_at = now
+    set_last_action(state, gesture)
 
 
 def press_hotkey(keys: Sequence[str]) -> None:
@@ -196,35 +238,6 @@ def press_hotkey(keys: Sequence[str]) -> None:
         pyautogui.press(keys[0])
     else:
         pyautogui.hotkey(*keys)
-
-
-def handle_open_palm_swipe(
-    state: RuntimeState, landmarks: Sequence, now: float
-) -> Optional[str]:
-    palm_x = landmarks[0].x
-
-    if state.swipe_started_at is None or now - state.swipe_started_at > SWIPE_WINDOW_SECONDS:
-        state.swipe_started_at = now
-        state.swipe_start_x = palm_x
-        return None
-
-    if state.swipe_start_x is None:
-        state.swipe_start_x = palm_x
-        return None
-
-    delta_x = palm_x - state.swipe_start_x
-    if abs(delta_x) < SWIPE_DISTANCE:
-        return None
-
-    state.swipe_started_at = None
-    state.swipe_start_x = None
-    state.clutch_started_at = None
-    state.clutch_locked_until_release = True
-
-    if delta_x > 0:
-        return "Swipe Right"
-
-    return "Swipe Left"
 
 
 def execute_action(
@@ -235,23 +248,27 @@ def execute_action(
     now: float,
 ) -> None:
     if not state.armed:
-        state.scroll_anchor_y = None
-        state.swipe_started_at = None
-        state.swipe_start_x = None
+        state.last_scroll_at = 0.0
         return
 
-    if gesture != "Cursor Move":
+    cursor_stable_gestures = (
+        "Cursor Move",
+        "Click Prep",
+        "Left Click Pinch",
+        "Right Click Pinch",
+    )
+    if gesture not in cursor_stable_gestures:
         state.cursor_position = None
 
-    if gesture != "Scroll":
-        state.scroll_anchor_y = None
-
-    if gesture != "Open Palm":
-        state.swipe_started_at = None
-        state.swipe_start_x = None
+    if gesture not in ("Scroll Up", "Scroll Down"):
+        state.last_scroll_at = 0.0
 
     if gesture == "Cursor Move":
         move_cursor(state, landmarks, screen_size)
+        return
+
+    if gesture == "Click Prep":
+        set_last_action(state, "Hold cursor for click")
         return
 
     if gesture == "Left Click Pinch" and can_fire(
@@ -270,8 +287,8 @@ def execute_action(
         set_last_action(state, "Right click")
         return
 
-    if gesture == "Scroll":
-        scroll_from_hand(state, landmarks)
+    if gesture in ("Scroll Up", "Scroll Down"):
+        scroll_from_hand(state, gesture, now)
         return
 
     if gesture == "Volume Up" and can_fire(state.last_key_at, KEY_COOLDOWN_SECONDS, now):
@@ -286,18 +303,20 @@ def execute_action(
         set_last_action(state, "Volume down")
         return
 
-    if gesture == "Open Palm":
-        swipe = handle_open_palm_swipe(state, landmarks, now)
-        if swipe == "Swipe Left" and can_fire(state.last_key_at, KEY_COOLDOWN_SECONDS, now):
-            press_hotkey(("alt", "left"))
-            state.last_key_at = now
-            set_last_action(state, "Navigate back")
-        elif swipe == "Swipe Right" and can_fire(
-            state.last_key_at, KEY_COOLDOWN_SECONDS, now
-        ):
-            press_hotkey(("alt", "right"))
-            state.last_key_at = now
-            set_last_action(state, "Navigate forward")
+    if gesture == "Navigate Back" and can_fire(
+        state.last_key_at, KEY_COOLDOWN_SECONDS, now
+    ):
+        press_hotkey(("alt", "left"))
+        state.last_key_at = now
+        set_last_action(state, "Navigate back")
+        return
+
+    if gesture == "Navigate Forward" and can_fire(
+        state.last_key_at, KEY_COOLDOWN_SECONDS, now
+    ):
+        press_hotkey(("alt", "right"))
+        state.last_key_at = now
+        set_last_action(state, "Navigate forward")
 
 
 def draw_overlay(
@@ -532,9 +551,7 @@ def main() -> None:
                 else:
                     handle_clutch(state, gesture, now)
                     state.cursor_position = None
-                    state.scroll_anchor_y = None
-                    state.swipe_started_at = None
-                    state.swipe_start_x = None
+                    state.last_scroll_at = 0.0
 
                 draw_overlay(frame, state, detected, gesture, fingers)
                 cv2.imshow(WINDOW_NAME, frame)
